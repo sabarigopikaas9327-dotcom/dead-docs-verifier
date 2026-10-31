@@ -1,0 +1,53 @@
+name: Dead-Docs AI Verifier
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  issues: write
+  models: read
+
+jobs:
+  verify-documentation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install OpenAI SDK
+        run: pip install openai>=1.50.0
+
+      - name: Run Open-Source AI Doc Verifier
+        id: verify
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python verifier.py
+
+      - name: Auto-Create Hacktoberfest Issue on Drift
+        if: steps.verify.outcome == 'failure' && github.event_name == 'push'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('verification_report.json', 'utf8'));
+            const details = report.issues.map(i => 
+              `### Function: \`${i.function}\`\n- **Problem:** ${i.problem}\n- **Suggested Fix:**\n\`\`\`python\n${i.fixed_snippet}\n\`\`\``
+            ).join('\n\n');
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Docs Drift Detected: README examples out of sync with source code',
+              body: `The automated open-source AI verifier found outdated documentation snippets:\n\n${details}`,
+              labels: ['documentation', 'good first issue', 'hacktoberfest']
+            });
